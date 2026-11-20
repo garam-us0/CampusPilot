@@ -1,5 +1,7 @@
 # Course Voices — 설치 및 운영 안내
 
+> **CampusPilot Vercel 배포** — 현재 통합 사이트의 Course Insights 강의 삭제는 Supabase가 아닌 기존 Vercel Postgres API를 사용합니다. 배포 전 Vercel 프로젝트 환경 변수 `CAMPUSPILOT_COURSE_ADMIN_PASSPHRASE`에 16자 이상인 새 무작위 비밀 문구를 설정하고 재배포하세요. 기존 부서 로그인 코드와 다른 값을 사용하고 Git이나 HTML에는 넣지 않습니다. 관리자는 `Delete course` 확인창에서 이 문구를 입력합니다. 목록에서 삭제한 강의의 후기와 신고는 DB에 유지됩니다. 아래 내용은 이전 독립형 프로토타입에만 적용됩니다.
+
 이 버전은 CampusPilot과 연결하지 않는 독립형 교수·강의 후기 서비스입니다. 기존 사이트의 계정, 비밀번호, 관리자 코드를 사용하지 않습니다. 학생용 `index.html`과 관리자용 `admin.html`은 같은 폴더에서 서로 연결됩니다.
 
 ## 제공 파일
