@@ -21,7 +21,7 @@ export default async function handler(req: JsonRequest, res: ServerResponse) {
       const keysParam = url.searchParams.get('keys') || '';
       const keys = keysParam.split(',').map((s) => s.trim()).filter(Boolean);
       if (!keys.length) { sendJson(res, 200, {}); return; }
-      const result = await sql`SELECT key, value FROM kv_store WHERE key = ANY(${keys})`;
+      const result = await sql.query('SELECT key, value FROM kv_store WHERE key = ANY($1)', [keys]);
       const out: Record<string, unknown> = {};
       for (const row of result.rows as any[]) out[row.key] = row.value;
       sendJson(res, 200, out);
