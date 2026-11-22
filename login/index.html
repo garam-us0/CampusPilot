@@ -146,15 +146,11 @@
      reflects something the person typed. -->
 <div class="modal-overlay hidden" id="forgotPwModal" onclick="if(event.target===this)closeForgotPwModal()">
   <div class="login-modal-card">
-    <h3>Reset Your Password</h3>
-    <p class="login-modal-sub">Enter your UNID or school email and we'll send a reset link.</p>
-    <div class="field-label">UNID or Email</div>
-    <div class="field">
-      <input id="forgotPwInput" placeholder="e.g. u1621896 or u1621896@umail.utah.edu" onkeydown="if(event.key==='Enter')submitForgotPw()">
-    </div>
+    <h3>Forgot Your Password?</h3>
+    <p class="login-modal-sub">Campuspilot doesn't send password reset emails. If you've forgotten your password, just sign up again with the <b>same UNID</b> — it resets your password (your name and major stay attached to your account).</p>
     <div class="login-modal-actions">
       <button type="button" class="btn btn-ghost" style="flex:1;" onclick="closeForgotPwModal()">Cancel</button>
-      <button type="button" class="btn btn-red" style="flex:1;" onclick="submitForgotPw()">Send Reset Link</button>
+      <button type="button" class="btn btn-red" style="flex:1;" onclick="goToSignupFromForgotPw()">Sign Up Again</button>
     </div>
   </div>
 </div>

@@ -283,6 +283,41 @@ function gpCutoffMentionedInSyllabus(text, min){
    is only trusted if its number is literally present in the syllabus
    text — otherwise the course falls back to the standard scale rather
    than risk a hallucinated cutoff. */
+/* The course "code" is what shows in the small pill at the top of the
+   page (gpRenderPills) -- it's meant to be a short department+number
+   label like "CS 2100", but the AI parser doesn't always return a clean
+   one: sometimes it's the full course title, sometimes it's missing, and
+   the old code just blindly truncated whatever came back to 14
+   characters, which could cut a real title mid-word into something
+   unreadable. This instead actually looks for something that resembles
+   a real course code (letters + a number, e.g. "CHEM 1210", "CS-2100")
+   in the parsed code first, then in the course name (a few models put
+   the code there instead), and only falls back to a short, word-
+   boundary-safe label built from the name/filename if neither looks like
+   a real code -- so the pill always shows either a real code or a short,
+   legible phrase, never a mid-word fragment. */
+var GP_COURSE_CODE_RE = /\b([A-Za-z]{2,6})[\s-]?(\d{3,4}[A-Za-z]?)\b/;
+function gpExtractCourseCode(s){
+  if(!s) return null;
+  var m = String(s).match(GP_COURSE_CODE_RE);
+  return m ? (m[1].toUpperCase() + ' ' + m[2].toUpperCase()) : null;
+}
+function gpShortLabel(base, maxLen){
+  var words = String(base||'').replace(/[_]+/g,' ').trim().split(/\s+/).filter(Boolean);
+  var label = '';
+  for(var i=0;i<words.length;i++){
+    var next = label ? (label + ' ' + words[i]) : words[i];
+    if(next.length > maxLen) break;
+    label = next;
+  }
+  return label || 'New Course';
+}
+function gpCleanCourseCode(rawCode, name, fallbackBase){
+  return gpExtractCourseCode(rawCode)
+    || gpExtractCourseCode(name)
+    || gpShortLabel(name || fallbackBase, 18);
+}
+
 function gpMapParsedSyllabus(parsed, filename, rawText){
   var gradeScaleRaw = Array.isArray(parsed.gradeScale) ? parsed.gradeScale
     .filter(function(g){ return typeof g.label === 'string' && isFinite(Number(g.min)); })
@@ -309,9 +344,12 @@ function gpMapParsedSyllabus(parsed, filename, rawText){
 
   var credits = (typeof parsed.credits === 'number' && parsed.credits > 0) ? parsed.credits : undefined;
 
+  var fallbackBase = (filename.split('.')[0]||'New Course');
+  var name = (typeof parsed.name === 'string' && parsed.name.trim()) ? parsed.name.trim() : fallbackBase;
+
   return {
-    code: (parsed.code || (filename.split('.')[0]||'New Course')).slice(0,14),
-    name: parsed.name || (filename.split('.')[0]||'New Course'),
+    code: gpCleanCourseCode(parsed.code, name, fallbackBase),
+    name: name,
     instructor: parsed.professor || 'Instructor TBD',
     credits: credits, file: filename, target: 'A',
     components: components,
@@ -638,9 +676,54 @@ function gpRenderPills(){
   wrap.innerHTML = keys.map(function(key){
     var c = gpCourses[key];
     var active = key === gpActiveKey;
+    var armed = key === gpDeleteArmedKey;
     var gradeSpan = c.currentLetter ? ' <span class="pill-grade">'+c.currentLetter+'</span>' : '';
-    return '<button class="gp-pill'+(active?' active':'')+'" onclick="gpSelectCourse(\''+key+'\')"><span class="dot"></span>'+c.code+gradeSpan+'</button>';
+    return '<span class="gp-pill-wrap">' +
+      '<button class="gp-pill'+(active?' active':'')+'" onclick="gpSelectCourse(\''+key+'\')"><span class="dot"></span>'+c.code+gradeSpan+'</button>' +
+      '<button type="button" class="gp-pill-x'+(armed?' armed':'')+'" onclick="event.stopPropagation();gpDeleteCourse(\''+key+'\')" title="'+(armed?'Click again to remove':'Remove this course')+'" aria-label="Remove '+c.code+'">'+(armed?'Confirm':'×')+'</button>' +
+    '</span>';
   }).join('');
+}
+/* Per-course delete -- separate from "Clear All" (gpClearAll above),
+   which wipes every course at once. Uses the same two-click armed
+   pattern (window.confirm()/alert() are silently auto-dismissed inside a
+   sandboxed Artifact preview, so a real confirm() dialog can't be relied
+   on there) but tracks ONE armed course key at a time instead of a single
+   global flag, since several pills can sit side by side. */
+var gpDeleteArmedKey = null;
+var gpDeleteArmTimer = null;
+function gpResetDeleteArm(){
+  gpDeleteArmedKey = null;
+  clearTimeout(gpDeleteArmTimer);
+}
+function gpDeleteCourse(key){
+  if(!gpCourses[key]) return;
+  if(gpDeleteArmedKey !== key){
+    gpDeleteArmedKey = key;
+    clearTimeout(gpDeleteArmTimer);
+    gpDeleteArmTimer = setTimeout(function(){ gpResetDeleteArm(); gpRenderPills(); }, 4000);
+    gpRenderPills();
+    return;
+  }
+  gpResetDeleteArm();
+  var removedCode = gpCourses[key].code;
+  var wasActive = (key === gpActiveKey);
+  delete gpCourses[key];
+
+  if(wasActive){
+    var remaining = Object.keys(gpCourses);
+    gpActiveKey = remaining.length ? remaining[0] : null;
+  }
+  gpPersist();
+
+  if(Object.keys(gpCourses).length === 0){
+    gpShowUpload();
+  } else {
+    gpShowDashboard();
+    gpRenderCourse();
+  }
+  gpRenderPills();
+  showToast('Removed ' + (removedCode || 'course') + '.');
 }
 function gpSelectCourse(key){
   gpActiveKey = key;

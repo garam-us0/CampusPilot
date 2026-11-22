@@ -3,7 +3,21 @@
    typed value can no longer create an account, which is also what used
    to let a careless login through. Stored once here (Postgres), so this
    is the same account whichever device the student signs in from, and
-   the one the admin roster (api/accounts/list) reflects immediately. */
+   the one the admin roster (api/accounts/list) reflects immediately.
+
+   There's no email/SMS service, so "forgot password" (login.js) points
+   students back here: signing up again under their OWN UNID is how they
+   regain access. Rather than rejecting that as "already registered" (the
+   old behavior) or inserting a second row (which would let the student
+   roster balloon with duplicates every time someone forgot a password),
+   a signup for an existing UNID overwrites that one account's password/
+   name/major in place -- joined_at (their original "member since" date)
+   is left untouched. wasReset in the response tells the client which
+   case happened, for the toast message. This does mean anyone who knows
+   a UNID can reset its password without proving who they are -- the same
+   trust level as the rest of this prototype (e.g. the admin passcode is
+   a fixed, publicly-knowable "000000") and an accepted tradeoff for not
+   having a real email-verification step. */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ensureTables, sql, sendJson, requestBody, isValidUnid } from '../_db';
 
@@ -34,15 +48,19 @@ export default async function handler(req: JsonRequest, res: ServerResponse) {
     const joinedAt = Date.now();
     const result = await sql`INSERT INTO accounts (unid, password, name, major, major2, joined_at)
       VALUES (${unid}, ${password}, ${name}, ${major}, ${major2}, ${joinedAt})
-      ON CONFLICT (unid) DO NOTHING
-      RETURNING unid, name, major, major2, joined_at`;
+      ON CONFLICT (unid) DO UPDATE SET
+        password = EXCLUDED.password,
+        name = EXCLUDED.name,
+        major = EXCLUDED.major,
+        major2 = EXCLUDED.major2
+      RETURNING unid, name, major, major2, joined_at, (xmax = 0) AS was_inserted`;
 
-    if (result.rows.length === 0) {
-      sendJson(res, 409, { ok: false, error: 'That UNID is already registered — sign in instead.' });
-      return;
-    }
     const row = result.rows[0] as any;
-    sendJson(res, 200, { ok: true, account: { unid: row.unid, name: row.name, major: row.major, major2: row.major2, joinedAt: Number(row.joined_at) } });
+    sendJson(res, 200, {
+      ok: true,
+      wasReset: !row.was_inserted,
+      account: { unid: row.unid, name: row.name, major: row.major, major2: row.major2, joinedAt: Number(row.joined_at) }
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Server error.';
     sendJson(res, 500, { ok: false, error: message });

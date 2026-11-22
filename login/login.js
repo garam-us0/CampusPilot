@@ -152,7 +152,9 @@ async function trySignUp(){
     return;
   }
 
-  showToast('Account created — sign in with your new UNID and password.');
+  showToast(result.wasReset
+    ? 'Password reset — sign in with your UNID and new password.'
+    : 'Account created — sign in with your new UNID and password.');
   document.getElementById('login-unid').value = result.account.unid;
   document.getElementById('login-pw').value = '';
   document.getElementById('signup-unid').value = '';
@@ -229,33 +231,28 @@ function wireOtpBoxes(){
 }
 
 /* ---------------- Forgot Password modal ----------------
-   Used to show "A password reset link has been sent..." with no email
-   ever collected. Now actually asks for a UNID/email first. This is a
-   static prototype with no real backend/email service, so nothing is
-   actually sent -- but the confirmation now honestly reflects what the
-   person typed instead of claiming to have emailed an address nobody
-   entered. */
+   Used to ask for a UNID/email and fake-send a reset link -- there was
+   never a real email service behind it, so nothing was ever actually
+   sent. Campuspilot has no email/SMS channel at all, so instead of
+   pretending to send something, this now says so plainly and points at
+   the one real way to regain access: signing up again with the same
+   UNID. createAccount()/api/accounts/signup now treats a signup for an
+   already-registered UNID as a password reset (it overwrites that
+   account's password/name/major rather than rejecting it or creating a
+   second account) -- so this never piles up duplicate accounts, and the
+   student roster an admin sees never grows just because someone forgot
+   their password. */
 function openForgotPwModal(){
-  document.getElementById('forgotPwInput').value = '';
   document.getElementById('forgotPwModal').classList.remove('hidden');
-  document.getElementById('forgotPwInput').focus();
 }
 function closeForgotPwModal(){
   document.getElementById('forgotPwModal').classList.add('hidden');
 }
-function submitForgotPw(){
-  var raw = (document.getElementById('forgotPwInput').value || '').trim();
-  if(!raw){
-    showToast('Enter your UNID or school email first.');
-    return;
-  }
-  if(raw.indexOf('@') !== -1 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)){
-    showToast('Enter a valid email address, or just your UNID.');
-    return;
-  }
-  var target = raw.indexOf('@') !== -1 ? raw : (raw + '@umail.utah.edu');
+function goToSignupFromForgotPw(){
   closeForgotPwModal();
-  showToast('A password reset link has been sent to ' + target);
+  if(studentMode !== 'signup') toggleSignupMode();
+  var unidEl = document.getElementById('signup-unid');
+  if(unidEl) unidEl.focus();
 }
 
 /* ---------------- Request Department Key modal ----------------
