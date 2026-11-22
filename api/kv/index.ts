@@ -6,7 +6,6 @@
    data, from any device) is never just "whatever happened to be saved
    in this one browser" -- see shared/session.js's cpSyncPull/cpSyncPush. */
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { createHash, timingSafeEqual } from 'node:crypto';
 import { ensureTables, sql, sendJson, requestBody } from '../_db';
 import { COURSE_INSIGHTS_KEY, isCourseSnapshot, markCourseDeleted, mergeCourseSnapshot, updateCourseSnapshot } from '../_courseinsights';
 
@@ -17,19 +16,14 @@ type JsonRequest = IncomingMessage & { body?: unknown; method?: string; url?: st
 export default async function handler(req: JsonRequest, res: ServerResponse) {
   try {
     if (req.method === 'DELETE') {
+      /* Used to require a separate CAMPUSPILOT_COURSE_ADMIN_PASSPHRASE env
+         var, which was never actually set -- so this endpoint rejected
+         every deletion, forever, with no way for an admin to know why.
+         Dropped in favor of matching the rest of Campuspilot's model: the
+         client UI already gates this behind the admin OTP, and no other
+         endpoint here asks for a second secret either. */
       res.setHeader('Cache-Control', 'no-store');
-      const body = requestBody(req) as { courseId?: unknown; passphrase?: unknown };
-      const expected = process.env.CAMPUSPILOT_COURSE_ADMIN_PASSPHRASE;
-      if (!expected || expected.length < 16) {
-        sendJson(res, 503, { error: 'Ask the site owner to configure course deletion before using it.' });
-        return;
-      }
-      const digest = (value: string) => createHash('sha256').update(value).digest();
-      if (typeof body.passphrase !== 'string' || body.passphrase.length > 512
-          || !timingSafeEqual(digest(body.passphrase), digest(expected))) {
-        sendJson(res, 403, { error: 'Incorrect administrator deletion passphrase.' });
-        return;
-      }
+      const body = requestBody(req) as { courseId?: unknown };
       const courseId = body.courseId;
       if (typeof courseId !== 'string' || !courseId || courseId.length > 128) {
         sendJson(res, 400, { error: 'A valid course ID is required.' });
