@@ -57,6 +57,10 @@
           <div class="fh-sub">See what campus jobs are really like – ask the students who do them now.</div>
         </div>
       </div>
+      <button type="button" class="btn" data-action="inbox" id="cjInboxBtn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        My Messages<span id="cjInboxBadge" class="badge red" style="margin-left:6px" hidden>0</span>
+      </button>
     </header>
 
     <section class="how" aria-label="How it works">
@@ -207,6 +211,142 @@
     if (!r.length) return null;
     var sum = r.reduce(function (a, p) { return a + p.rating; }, 0);
     return { avg: Math.round(sum / r.length * 10) / 10, n: r.length };
+  }
+
+  /* ===== Campus Jobs messaging =====
+     A "staff member" here is just an ordinary logged-in student whose
+     school email happens to match a data.staff[] listing -- there is no
+     separate staff account. So a real two-way conversation is a thread
+     keyed by (staffId, studentUnid), and the SAME person can show up as
+     an asker in one thread and as the answering "staff" in another.
+     Old entries from the previous one-shot/never-read version of this
+     feature (plain {id,to,from,text,time} with from = a display name)
+     are normalized on read so they don't crash -- they're treated as a
+     student message with an unknown studentUnid, so they just won't
+     show up anywhere (nobody could reply to them anyway). */
+  function cjNormMsg(m) {
+    var dir = (m.from === 'student' || m.from === 'staff') ? m.from : 'student';
+    return {
+      id: m.id,
+      staffId: m.staffId || m.to,
+      studentUnid: m.studentUnid || null,
+      studentName: m.studentName || (dir === 'student' && typeof m.from === 'string' && m.from !== 'student' ? m.from : 'Student'),
+      from: dir,
+      text: m.text,
+      time: m.time,
+      readByStaff: m.readByStaff != null ? m.readByStaff : false,
+      readByStudent: m.readByStudent != null ? m.readByStudent : true
+    };
+  }
+  function cjMessages() { return (data.messages || []).map(cjNormMsg); }
+  function cjThread(staffId, studentUnid) {
+    return cjMessages().filter(function (m) { return m.staffId === staffId && m.studentUnid === studentUnid; })
+      .sort(function (a, b) { return a.time - b.time; });
+  }
+  function cjThreadStudentName(thread) {
+    var m = thread.filter(function (x) { return x.from === 'student' && x.studentName; })[0];
+    return m ? m.studentName : 'Student';
+  }
+  function cjMyStaffIds() {
+    if (!ME_UNID) return [];
+    var meEmail = (ME_UNID + '@umail.utah.edu').toLowerCase();
+    return data.staff.filter(function (s) { return (s.email || '').toLowerCase() === meEmail; }).map(function (s) { return s.id; });
+  }
+  function cjThreadsAsStudent() {
+    if (!ME_UNID) return [];
+    var ids = {};
+    cjMessages().forEach(function (m) { if (m.studentUnid === ME_UNID) ids[m.staffId] = true; });
+    return Object.keys(ids).map(function (staffId) {
+      var thread = cjThread(staffId, ME_UNID);
+      var last = thread[thread.length - 1];
+      var s = data.staff.filter(function (x) { return x.id === staffId; })[0];
+      var job = s ? findJob(data, s.jobId) : null;
+      return {
+        staffId: staffId,
+        name: s ? s.name : 'Removed listing',
+        job: job ? job.title : '',
+        last: last,
+        unread: thread.filter(function (m) { return m.from === 'staff' && !m.readByStudent; }).length
+      };
+    }).sort(function (a, b) { return (b.last ? b.last.time : 0) - (a.last ? a.last.time : 0); });
+  }
+  function cjThreadsAsStaff() {
+    var mine = cjMyStaffIds();
+    if (!mine.length) return [];
+    var keys = {};
+    cjMessages().forEach(function (m) { if (mine.indexOf(m.staffId) !== -1 && m.studentUnid) keys[m.staffId + '::' + m.studentUnid] = true; });
+    return Object.keys(keys).map(function (key) {
+      var i = key.indexOf('::'), staffId = key.slice(0, i), studentUnid = key.slice(i + 2);
+      var thread = cjThread(staffId, studentUnid);
+      var last = thread[thread.length - 1];
+      var s = data.staff.filter(function (x) { return x.id === staffId; })[0];
+      var job = s ? findJob(data, s.jobId) : null;
+      return {
+        key: key,
+        studentName: cjThreadStudentName(thread),
+        job: job ? job.title : '(listing removed)',
+        last: last,
+        unread: thread.filter(function (m) { return m.from === 'student' && !m.readByStaff; }).length
+      };
+    }).sort(function (a, b) { return (b.last ? b.last.time : 0) - (a.last ? a.last.time : 0); });
+  }
+  function cjPreview(t, viewerIsStaff) {
+    if (!t.last) return 'No messages yet';
+    var mine = viewerIsStaff ? (t.last.from === 'staff') : (t.last.from === 'student');
+    return (mine ? 'You: ' : 'Them: ') + t.last.text;
+  }
+  function cjThreadHtml(thread, viewerIsStaff, counterpartName) {
+    if (!thread.length) return '';
+    return '<div class="comments" style="max-height:260px;overflow-y:auto;border-top:0;padding-top:0;margin-bottom:4px">' +
+      thread.map(function (m) {
+        var fromMe = viewerIsStaff ? (m.from === 'staff') : (m.from === 'student');
+        var label = fromMe ? 'You' : (counterpartName || (viewerIsStaff ? 'Student' : 'Staff'));
+        return '<div class="comment' + (m.from === 'staff' ? ' staff' : '') + '">' +
+          '<div class="muted small" style="font-weight:700">' + esc(label) + ' · ' + ago(m.time) + '</div>' +
+          '<p>' + esc(m.text) + '</p>' +
+        '</div>';
+      }).join('') + '</div>';
+  }
+  function cjThreadRow(action, id, title, sub, preview, unread, time) {
+    return '<button type="button" class="person" style="text-align:left;cursor:pointer" data-action="' + action + '" data-id="' + id + '">' +
+      '<div class="row-between"><div><b>' + esc(title) + '</b><div class="muted small">' + esc(sub) + '</div></div>' +
+        (unread ? '<span class="badge red">' + unread + ' new</span>' : '<span class="muted small">' + (time ? ago(time) : '') + '</span>') +
+      '</div>' +
+      '<div class="muted small" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(preview) + '</div>' +
+    '</button>';
+  }
+  function cjRenderInbox() {
+    var studentThreads = cjThreadsAsStudent();
+    var staffThreads = cjThreadsAsStaff();
+    var html = '<div style="display:flex;flex-direction:column;gap:10px">';
+    html += '<h3 style="margin:0 0 -2px">Your conversations</h3>';
+    if (!studentThreads.length) {
+      html += '<div class="empty" style="margin:0">You haven\u2019t messaged any staff yet. Open a job\u2019s \u201cAsk current staff\u201d tab to start one.</div>';
+    } else {
+      html += studentThreads.map(function (t) {
+        return cjThreadRow('message', t.staffId, t.name + (t.job ? ' · ' + t.job : ''), 'Current staff', cjPreview(t, false), t.unread, t.last ? t.last.time : null);
+      }).join('');
+    }
+    if (cjMyStaffIds().length) {
+      html += '<h3 style="margin:14px 0 -2px">Questions from students</h3>';
+      if (!staffThreads.length) {
+        html += '<div class="empty" style="margin:0">No one has messaged you yet.</div>';
+      } else {
+        html += staffThreads.map(function (t) {
+          return cjThreadRow('staff-thread', t.key, t.studentName, t.job, cjPreview(t, true), t.unread, t.last ? t.last.time : null);
+        }).join('');
+      }
+    }
+    html += '</div>';
+    return html;
+  }
+  function renderInboxBadge() {
+    var b = document.getElementById('cjInboxBadge');
+    if (!b) return;
+    var n = cjThreadsAsStudent().reduce(function (sum, t) { return sum + t.unread; }, 0) +
+      cjThreadsAsStaff().reduce(function (sum, t) { return sum + t.unread; }, 0);
+    b.textContent = n > 9 ? '9+' : String(n);
+    b.hidden = !n;
   }
 
   function toast(msg) { showToast(msg); }
@@ -449,7 +589,7 @@
     return html + '</article>';
   }
 
-  function renderAll() { ensureJob(); renderGroupSelect(); renderActiveFilter(); renderList(); renderDetail(); }
+  function renderAll() { ensureJob(); renderGroupSelect(); renderActiveFilter(); renderList(); renderDetail(); renderInboxBadge(); }
 
   function addComment(id) {
     var input = document.getElementById('c-' + id);
@@ -529,14 +669,53 @@
       save(data); closeModal(); renderDetail(); toast('Thanks – an admin will review this post');
       return;
     }
+    if (a === 'inbox') {
+      openModal(modalHead('My Messages', 'Conversations with campus-job staff') + cjRenderInbox() +
+        '<div class="actions" style="justify-content:flex-end"><button type="button" class="btn" data-action="close-modal">Close</button></div>');
+      return;
+    }
     if (a === 'message') {
       var s = data.staff.filter(function (x) { return x.id === id; })[0];
+      if (!s) { closeModal(); toast('This listing no longer exists'); return; }
       var job = findJob(data, s.jobId);
+      var thread = cjThread(id, ME_UNID);
+      var markedRead = false;
+      thread.forEach(function (m) {
+        if (m.from === 'staff' && !m.readByStudent) {
+          var raw = data.messages.filter(function (x) { return x.id === m.id; })[0];
+          if (raw) { raw.readByStudent = true; markedRead = true; }
+        }
+      });
+      if (markedRead) { save(data); renderInboxBadge(); }
       openModal(modalHead('Message ' + esc(s.name), esc(job.title) + ' · Current staff') +
+        '<div style="margin:-6px 0 2px"><button type="button" class="btn btn-ghost btn-sm" data-action="inbox" style="padding:0;min-height:auto;height:auto">&larr; All messages</button></div>' +
+        cjThreadHtml(thread, false, s.name) +
         '<label class="f" for="msgText">Your question<textarea id="msgText" class="textarea" placeholder="Hi! I’m thinking about applying. How busy is the job during midterms?"></textarea></label>' +
         '<div class="muted small">Your name (' + esc(ME) + ') is shown to ' + esc((s.name || '').split(' ')[0]) + ' so they can reply to your school email.</div>' +
         '<div class="actions" style="justify-content:flex-end"><button type="button" class="btn" data-action="close-modal">Cancel</button>' +
         '<button type="button" class="btn btn-primary" data-action="send-message" data-id="' + id + '">Send message</button></div>');
+      return;
+    }
+    if (a === 'staff-thread') {
+      var sepIdx = id.indexOf('::'), rStaffId = id.slice(0, sepIdx), rStudentUnid = id.slice(sepIdx + 2);
+      var rStaff = data.staff.filter(function (x) { return x.id === rStaffId; })[0];
+      var rJob = rStaff ? findJob(data, rStaff.jobId) : null;
+      var rThread = cjThread(rStaffId, rStudentUnid);
+      var rMarkedRead = false;
+      rThread.forEach(function (m) {
+        if (m.from === 'student' && !m.readByStaff) {
+          var rRaw = data.messages.filter(function (x) { return x.id === m.id; })[0];
+          if (rRaw) { rRaw.readByStaff = true; rMarkedRead = true; }
+        }
+      });
+      if (rMarkedRead) { save(data); renderInboxBadge(); }
+      var rStudentName = cjThreadStudentName(rThread);
+      openModal(modalHead('Message from ' + esc(rStudentName), (rJob ? esc(rJob.title) + ' · ' : '') + 'Asking about your listing') +
+        '<div style="margin:-6px 0 2px"><button type="button" class="btn btn-ghost btn-sm" data-action="inbox" style="padding:0;min-height:auto;height:auto">&larr; All messages</button></div>' +
+        cjThreadHtml(rThread, true, rStudentName) +
+        '<label class="f" for="staffReplyText">Your reply<textarea id="staffReplyText" class="textarea" placeholder="Happy to help — here’s what it’s really like…"></textarea></label>' +
+        '<div class="actions" style="justify-content:flex-end"><button type="button" class="btn" data-action="close-modal">Cancel</button>' +
+        '<button type="button" class="btn btn-primary" data-action="send-staff-reply" data-id="' + id + '">Send reply</button></div>');
       return;
     }
     if (a === 'email') {
@@ -565,8 +744,25 @@
       var m = document.getElementById('msgText'), txt = m.value.trim();
       if (!txt) { m.focus(); toast('Write your question first'); return; }
       var st = data.staff.filter(function (x) { return x.id === id; })[0];
-      data.messages.push({ id: uid('m'), to: id, from: ME, text: txt, time: Date.now() });
-      save(data); closeModal(); toast('Message sent to ' + st.name);
+      if (!st) { closeModal(); toast('This listing no longer exists'); return; }
+      data.messages.push({
+        id: uid('m'), staffId: id, studentUnid: ME_UNID, studentName: ME,
+        from: 'student', text: txt, time: Date.now(),
+        readByStaff: false, readByStudent: true
+      });
+      save(data); renderInboxBadge(); closeModal(); toast('Message sent to ' + st.name);
+      return;
+    }
+    if (a === 'send-staff-reply') {
+      var sepIdx2 = id.indexOf('::'), replyStaffId = id.slice(0, sepIdx2), replyStudentUnid = id.slice(sepIdx2 + 2);
+      var rm = document.getElementById('staffReplyText'), rtxt = rm.value.trim();
+      if (!rtxt) { rm.focus(); toast('Write a reply first'); return; }
+      data.messages.push({
+        id: uid('m'), staffId: replyStaffId, studentUnid: replyStudentUnid, studentName: null,
+        from: 'staff', text: rtxt, time: Date.now(),
+        readByStaff: true, readByStudent: false
+      });
+      save(data); renderInboxBadge(); closeModal(); toast('Reply sent');
       return;
     }
   });
