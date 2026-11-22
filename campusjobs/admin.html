@@ -380,7 +380,7 @@
     var f = function (key, label, ph) { return '<label class="f">' + label + '<input class="input" id="s-' + key + '" placeholder="' + ph + '"></label>'; };
     openModal(modalHead('Add current staff', 'They will appear under “Ask current staff”.') +
       '<label class="f">Job<select class="select" id="s-job">' + jobOptions(ui.staffJob === 'all' ? data.jobs[0].id : ui.staffJob, false) + '</select></label>' +
-      '<div class="grid2">' + f('name', 'Name', 'e.g. Minji Park') + f('email', 'School email', 'name@utah.edu') + '</div>' +
+      '<div class="grid2">' + f('name', 'Name', 'e.g. Minji Park') + f('email', 'School email', 'e.g. u1621896@umail.utah.edu') + '</div>' +
       f('major', 'Major', 'e.g. Business Administration') +
       f('since', 'Working since', 'e.g. Fall 2025') + f('intro', 'One-line intro (optional)', 'e.g. Ask me about workload!') +
       '<label class="check"><input type="checkbox" id="s-consent"> The student agreed to be listed and contacted</label>' +
@@ -439,7 +439,7 @@
     if (a === 'save-staff') {
       var name = val('s-name'), email = val('s-email'), major = val('s-major'), since = val('s-since');
       if (!name || !email) { toast('Name and email are required'); return; }
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { document.getElementById('s-email').focus(); toast('Enter a valid email address'); return; }
+      if (!/^u\d{7}@umail\.utah\.edu$/i.test(email)) { document.getElementById('s-email').focus(); toast('Enter a real school email, e.g. u1621896@umail.utah.edu'); return; }
       if (!major) { document.getElementById('s-major').focus(); toast('Major is required'); return; }
       if (!since) { document.getElementById('s-since').focus(); toast('Working since is required'); return; }
       if (!document.getElementById('s-consent').checked) { toast('Confirm the student agreed to be contacted'); return; }
