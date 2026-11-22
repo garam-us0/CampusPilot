@@ -68,10 +68,18 @@ function lfSetQuery(v){ lfQuery = v; lfRenderStudent(); }
 function lfSetStatusTab(v){ lfStatusTab = v; lfRenderStudent(); }
 
 function lfRenderStudentTabs(){
+  /* Tab badge counts must come from the SAME month + hidden filtering the
+     grid below actually uses (lfVisibleInMonth / it.hidden) — otherwise a
+     badge can say "Completed 4" while the grid under it renders nothing,
+     because those 4 completed items belong to months other than the one
+     being viewed right now. Category/search text still don't narrow these
+     counts on purpose (a typed search shouldn't make the tab numbers jump
+     around), but "is this item even in view at all" has to match. */
+  var inView = lfItems.filter(function(it){ return !it.hidden && lfVisibleInMonth(it, LF_VIEW_MONTH.y, LF_VIEW_MONTH.m); });
   var tabs = [['all','All Items'],['pending','Pending'],['completed','Completed']];
   document.getElementById('lfStatusTabs').innerHTML = tabs.map(function(t){
     var active = t[0] === lfStatusTab;
-    var count = t[0] === 'all' ? lfItems.length : lfItems.filter(function(it){ return it.status === t[0]; }).length;
+    var count = t[0] === 'all' ? inView.length : inView.filter(function(it){ return it.status === t[0]; }).length;
     return '<button class="lf-pill'+(active?' active':'')+'" onclick="lfSetStatusTab(\''+t[0]+'\')">'+t[1]+'<span class="cnt">'+count+'</span></button>';
   }).join('');
 }
@@ -81,14 +89,24 @@ function lfRenderStudent(){
   var list = lfFilteredStudent();
   var grid = document.getElementById('lfGrid');
   if(!list.length){
-    /* "No items match your search" implies a search happened -- wrong on a
-       genuinely empty registry (nothing registered at all, or every item
-       hidden), so that copy is reserved for when a search/filter actually
-       narrowed a non-empty registry down to nothing. */
-    var hasAnyVisible = lfItems.some(function(it){ return !it.hidden; });
-    grid.innerHTML = hasAnyVisible
-      ? '<div class="lf-empty">No items match your search.</div>'
-      : '<div class="lf-empty">No items have been reported yet.</div>';
+    /* Three different reasons the grid can be empty, each needing its own
+       copy: (1) a search/category/status filter is actually active and
+       narrowed a non-empty registry down to nothing -- "No items match
+       your search"; (2) nothing is active, this month itself just has no
+       items, while other months do -- "No items reported for this month"
+       (previously this case wrongly fell under message 1, implying a
+       search happened when the student hadn't typed anything); (3) the
+       whole registry (every month, hidden ones aside) is empty -- "No
+       items have been reported yet". */
+    var filtersActive = !!lfQuery.trim() || lfCategory !== 'all' || lfStatusTab !== 'all';
+    var hasAnyEver = lfItems.some(function(it){ return !it.hidden; });
+    /* If no filter is active and the list is still empty, this month itself
+       has nothing visible (filtersActive=false means list===hasAnyThisMonth
+       by construction, so there's no need to recompute that separately). */
+    var emptyMsg = filtersActive
+      ? 'No items match your search.'
+      : (!hasAnyEver ? 'No items have been reported yet.' : 'No items reported for this month.');
+    grid.innerHTML = '<div class="lf-empty">'+emptyMsg+'</div>';
     return;
   }
   grid.innerHTML = list.map(function(it){
@@ -137,11 +155,20 @@ var LF_TODAY = (function(){
 var LF_VIEW_MONTH = { y: LF_TODAY.y, m: LF_TODAY.m };
 function lfMonthKey(y, m){ return y + '-' + (m + 1 < 10 ? '0' : '') + (m + 1); }
 function lfVisibleInMonth(it, y, m){
-  var itemKey = it.date.slice(0, 7);
+  /* A pending item is keyed by when it was FOUND (it.date) and carries
+     forward every month until resolved. A completed item is keyed by
+     when it was RESOLVED (it.completedAt — the pickup date captured in
+     lfConfirmPickup) so it shows up as "closed this month" in whichever
+     month an admin actually picked it up, not forever stuck in the month
+     it happened to be found. Older records completed before this field
+     existed have no completedAt, so they fall back to their found-date
+     (unchanged old behavior) rather than vanishing outright. */
+  var effectiveDate = (it.status === 'completed' && it.completedAt) ? it.completedAt : it.date;
+  var itemKey = effectiveDate.slice(0, 7);
   var viewKey = lfMonthKey(y, m);
-  if(itemKey === viewKey) return true; /* logged in the month being viewed */
+  if(itemKey === viewKey) return true; /* found (pending) or resolved (completed) in the month being viewed */
   if(itemKey < viewKey && it.status !== 'completed') return true; /* still unclaimed — carries forward */
-  return false; /* resolved in an earlier month, or not logged yet as of this month */
+  return false; /* a completed item outside its resolution month, or not logged yet as of this month */
 }
 function lfUpdateMonthControls(){
   var yearSel = document.getElementById('lfYearSelect');
@@ -623,6 +650,7 @@ function lfConfirmPickup(){
   }
   it.status = 'completed';
   it.claimedBy = name + ' · ' + fmtDate(date);
+  it.completedAt = date;
   it.claimant = null;
   lfPersist();
   lfClosePickup();
@@ -635,6 +663,7 @@ function lfReopenItem(id){
   it.status = 'pending';
   it.claimedBy = null;
   it.claimant = null;
+  it.completedAt = null;
   lfPersist();
   showToast('Reopened as pending.');
   lfRenderAdmin();
