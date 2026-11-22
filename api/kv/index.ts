@@ -6,7 +6,9 @@
    data, from any device) is never just "whatever happened to be saved
    in this one browser" -- see shared/session.js's cpSyncPull/cpSyncPush. */
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { ensureTables, sql, sendJson, requestBody } from '../_db';
+import { COURSE_INSIGHTS_KEY, isCourseSnapshot, markCourseDeleted, mergeCourseSnapshot, updateCourseSnapshot } from '../_courseinsights';
 
 export const config = { runtime: 'nodejs' };
 
@@ -14,6 +16,32 @@ type JsonRequest = IncomingMessage & { body?: unknown; method?: string; url?: st
 
 export default async function handler(req: JsonRequest, res: ServerResponse) {
   try {
+    if (req.method === 'DELETE') {
+      res.setHeader('Cache-Control', 'no-store');
+      const body = requestBody(req) as { courseId?: unknown; passphrase?: unknown };
+      const expected = process.env.CAMPUSPILOT_COURSE_ADMIN_PASSPHRASE;
+      if (!expected || expected.length < 16) {
+        sendJson(res, 503, { error: 'Ask the site owner to configure course deletion before using it.' });
+        return;
+      }
+      const digest = (value: string) => createHash('sha256').update(value).digest();
+      if (typeof body.passphrase !== 'string' || body.passphrase.length > 512
+          || !timingSafeEqual(digest(body.passphrase), digest(expected))) {
+        sendJson(res, 403, { error: 'Incorrect administrator deletion passphrase.' });
+        return;
+      }
+      const courseId = body.courseId;
+      if (typeof courseId !== 'string' || !courseId || courseId.length > 128) {
+        sendJson(res, 400, { error: 'A valid course ID is required.' });
+        return;
+      }
+      await ensureTables();
+      const value = await updateCourseSnapshot(s => markCourseDeleted(s, courseId, new Date().toISOString()));
+      if (!value) { sendJson(res, 404, { error: 'This course is not in the server directory.' }); return; }
+      sendJson(res, 200, { ok: true, value });
+      return;
+    }
+
     await ensureTables();
 
     if (req.method === 'GET') {
@@ -31,6 +59,13 @@ export default async function handler(req: JsonRequest, res: ServerResponse) {
     if (req.method === 'PUT' || req.method === 'POST') {
       const body = requestBody(req) as { key?: unknown; value?: unknown };
       if (typeof body.key !== 'string' || !body.key) { sendJson(res, 400, { error: 'key is required' }); return; }
+      if (body.key === COURSE_INSIGHTS_KEY) {
+        const value = body.value;
+        if (!isCourseSnapshot(value)) { sendJson(res, 400, { error: 'Invalid Course Insights data.' }); return; }
+        await updateCourseSnapshot(current => mergeCourseSnapshot(current, value), true);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
       const valueJson = JSON.stringify(body.value === undefined ? null : body.value);
       await sql`INSERT INTO kv_store (key, value, updated_at)
         VALUES (${body.key}, ${valueJson}::jsonb, now())
