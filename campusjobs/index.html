@@ -540,14 +540,20 @@
       return;
     }
     if (a === 'email') {
+      /* "Open mail app" was a mailto: link -- unreliable (no default mail
+         client set up, or one the student doesn't actually use), and it
+         gave no feedback on whether anything even happened. Just show the
+         address plus a suggested subject line and let the student send it
+         themselves from whatever mail app they actually use (Outlook,
+         Gmail, etc.) -- "Copy address" already worked fine and is now the
+         only action here. */
       var se = data.staff.filter(function (x) { return x.id === id; })[0];
       var je = findJob(data, se.jobId);
-      var mailto = 'mailto:' + se.email + '?subject=' + encodeURIComponent('[CampusPilot] Question about ' + je.title);
+      var subject = '[CampusPilot] Question about ' + je.title;
       openModal(modalHead('Email ' + esc(se.name), esc(je.title) + ' · Current staff') +
         '<label class="f" for="emailAddr">School email<input id="emailAddr" class="input" value="' + esc(se.email) + '" readonly></label>' +
-        '<div class="muted small">Open your mail app with the subject filled in, or copy the address to use in Outlook or Gmail.</div>' +
-        '<div class="actions" style="justify-content:flex-end"><button type="button" class="btn" data-action="copy-email" data-id="' + id + '">Copy address</button>' +
-        '<a class="btn btn-primary" href="' + esc(mailto) + '" data-action="open-mail">' + ICON.mail + 'Open mail app</a></div>');
+        '<div class="muted small">Copy this address and send your question from Outlook (or whatever mail app you use). Suggested subject: “' + esc(subject) + '”.</div>' +
+        '<div class="actions" style="justify-content:flex-end"><button type="button" class="btn btn-primary" data-action="copy-email" data-id="' + id + '">' + ICON.mail + 'Copy address</button></div>');
       return;
     }
     if (a === 'copy-email') {
@@ -555,7 +561,6 @@
       copyText(sc.email, function (ok) { toast(ok ? 'Copied ' + sc.email : 'Copy failed – select the address and copy it'); });
       return;
     }
-    if (a === 'open-mail') { setTimeout(function () { closeModal(); toast('Opening your mail app…'); }, 50); return; }
     if (a === 'send-message') {
       var m = document.getElementById('msgText'), txt = m.value.trim();
       if (!txt) { m.focus(); toast('Write your question first'); return; }
