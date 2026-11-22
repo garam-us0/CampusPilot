@@ -149,6 +149,11 @@ function listAccounts(){
     .then(function(data){ return (data && Array.isArray(data.accounts)) ? data.accounts : []; })
     .catch(function(){ return []; });
 }
+/* Admin-only: permanently removes one student's account (My Profile's
+   registered-student roster). Resolves to {ok:true} or {ok:false,error}. */
+function deleteAccount(unid){
+  return apiPostJson('/api/accounts/delete', { unid: unid });
+}
 
 /* ---------------- shared: UAC department list ----------------
    Used by both the signup form (login.js) and My Profile's "Edit Major"

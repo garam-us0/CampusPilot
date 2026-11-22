@@ -97,11 +97,38 @@ function mpRenderAdminStats(){
 }
 
 /* Admin-only: table of every self-registered student account, searchable
-   by UNID or name. Reads the server's accounts table (api/accounts/list)
-   that login.js's sign-up writes to — there's no separate admin-side
-   copy, and it's the same list from any device, so a new sign-up shows
-   up here immediately regardless of which browser/computer it happened
-   on. listAccounts() now returns a Promise. */
+   by UNID or name, sortable by any column (click a header), and
+   deletable one student at a time (trash icon, far right). Reads the
+   server's accounts table (api/accounts/list) that login.js's sign-up
+   writes to — there's no separate admin-side copy, and it's the same
+   list from any device, so a new sign-up shows up here immediately
+   regardless of which browser/computer it happened on. listAccounts()
+   now returns a Promise.
+
+   Note on duplicates: unid is the accounts table's primary key (see
+   api/_db.ts), and re-signing-up under an existing UNID now overwrites
+   that row in place (api/accounts/signup) instead of inserting a second
+   one, so a literal duplicate-UNID row can't show up here. The trash
+   icon is a manual, one-at-a-time admin action (an admin picks a row
+   and removes it themselves) — not an automatic "find and delete
+   duplicates" button. */
+var mpRosterSort = { key: 'joinedAt', dir: 'asc' };
+var mpDeleteArmedUnid = null;
+var mpDeleteArmTimer = null;
+var ICON_TRASH = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+function mpResetDeleteArm(){
+  mpDeleteArmedUnid = null;
+  clearTimeout(mpDeleteArmTimer);
+}
+function mpSortRoster(key){
+  if(mpRosterSort.key === key){
+    mpRosterSort.dir = (mpRosterSort.dir === 'asc') ? 'desc' : 'asc';
+  } else {
+    mpRosterSort.key = key;
+    mpRosterSort.dir = (key === 'joinedAt') ? 'desc' : 'asc';
+  }
+  mpRenderStudentRoster();
+}
 async function mpRenderStudentRoster(){
   var searchEl = document.getElementById('studentSearch');
   var q = (searchEl ? searchEl.value : '').toLowerCase().trim();
@@ -110,22 +137,63 @@ async function mpRenderStudentRoster(){
     return !q || (a.unid + ' ' + a.name).toLowerCase().indexOf(q) !== -1;
   });
 
+  var key = mpRosterSort.key, dir = mpRosterSort.dir;
+  filtered.sort(function(a, b){
+    var av = a[key], bv = b[key];
+    if(key === 'joinedAt'){ av = Number(av) || 0; bv = Number(bv) || 0; }
+    else { av = String(av || '').toLowerCase(); bv = String(bv || '').toLowerCase(); }
+    var cmp = av < bv ? -1 : (av > bv ? 1 : 0);
+    return dir === 'asc' ? cmp : -cmp;
+  });
+
+  ['unid','name','major','joinedAt'].forEach(function(k){
+    var arrow = document.getElementById('rosterArrow-' + k);
+    if(arrow) arrow.textContent = (mpRosterSort.key === k) ? (mpRosterSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  });
+
   document.getElementById('studentRosterCount').textContent =
     accounts.length === 0
       ? 'No students have registered yet'
       : filtered.length + ' of ' + accounts.length + ' registered student' + (accounts.length === 1 ? '' : 's');
 
   document.getElementById('studentRosterBody').innerHTML = filtered.map(function(a){
+    var armed = a.unid === mpDeleteArmedUnid;
     return '<tr>' +
       '<td>' + mpEsc(a.unid) + '</td>' +
       '<td>' + mpEsc(a.name) + '</td>' +
       '<td>' + mpEsc(a.major || '—') + '</td>' +
       '<td>' + mpFormatJoined(a.joinedAt) + '</td>' +
+      '<td><button type="button" class="roster-del-btn' + (armed ? ' armed' : '') + '" title="' + (armed ? 'Click again to confirm' : 'Remove this student') + '" aria-label="Remove ' + mpEsc(a.unid) + '" onclick="mpDeleteStudent(\'' + a.unid + '\')">' + ICON_TRASH + (armed ? '<span class="roster-del-label">Click again to confirm</span>' : '') + '</button></td>' +
     '</tr>';
   }).join('');
 
   document.querySelector('#adminStudentPanel .roster-wrap').classList.toggle('hidden', filtered.length === 0);
   document.getElementById('studentRosterEmpty').style.display = filtered.length === 0 ? 'block' : 'none';
+}
+
+/* Two-click arm/confirm (not window.confirm — it's silently auto-
+   dismissed inside a sandboxed Artifact preview), same pattern used
+   for Campus Jobs' and GradePilot's destructive buttons. First click
+   arms just that row's trash icon (turns red, grows a "Click again to
+   confirm" label, 4-second auto-reset); a second click while armed
+   actually deletes the account from the server. */
+async function mpDeleteStudent(unid){
+  if(mpDeleteArmedUnid !== unid){
+    mpDeleteArmedUnid = unid;
+    clearTimeout(mpDeleteArmTimer);
+    mpDeleteArmTimer = setTimeout(function(){ mpResetDeleteArm(); mpRenderStudentRoster(); }, 4000);
+    mpRenderStudentRoster();
+    return;
+  }
+  mpResetDeleteArm();
+  var result = await deleteAccount(unid);
+  if(!result || !result.ok){
+    showToast((result && result.error) || 'Could not delete that account.');
+    mpRenderStudentRoster();
+    return;
+  }
+  showToast('Removed ' + unid + ' from the student roster.');
+  mpRenderStudentRoster();
 }
 
 /* Student: changes the password on their own registered account (prompt-

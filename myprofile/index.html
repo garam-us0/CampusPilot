@@ -121,7 +121,13 @@
         <div class="roster-wrap">
           <table class="roster-table">
             <thead>
-              <tr><th>UNID</th><th>Name</th><th>Major</th><th>Joined</th></tr>
+              <tr>
+                <th class="roster-th-sort" data-sort-key="unid" onclick="mpSortRoster('unid')">UNID<span class="roster-sort-arrow" id="rosterArrow-unid"></span></th>
+                <th class="roster-th-sort" data-sort-key="name" onclick="mpSortRoster('name')">Name<span class="roster-sort-arrow" id="rosterArrow-name"></span></th>
+                <th class="roster-th-sort" data-sort-key="major" onclick="mpSortRoster('major')">Major<span class="roster-sort-arrow" id="rosterArrow-major"></span></th>
+                <th class="roster-th-sort" data-sort-key="joinedAt" onclick="mpSortRoster('joinedAt')">Joined<span class="roster-sort-arrow" id="rosterArrow-joinedAt"></span></th>
+                <th></th>
+              </tr>
             </thead>
             <tbody id="studentRosterBody"></tbody>
           </table>
